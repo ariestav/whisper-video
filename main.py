@@ -35,6 +35,7 @@ def read_config(config_file):
     openai_model = config.get("OPENAI", "model")
     text_chunk_size = config.getint("OPTIONS", "text_chunk_size")
     max_chunk = config.getint("OPTIONS", "max_chunk")
+    max_words_per_subtitle = config.getint("OPTIONS", "max_words_per_subtitle")
 
     return (
         input_folder,
@@ -50,7 +51,8 @@ def read_config(config_file):
         openai_api_base,
         openai_model,
         text_chunk_size,
-        max_chunk
+        max_chunk,
+        max_words_per_subtitle
     )
 
 
@@ -95,12 +97,11 @@ def convert_to_mp3(video_file, audio_file):
     print(f"Conversion of {video_file} success")
     return True
 
-
-def generate_subtitles(model, task, audio_file, subtitle_file, transcript_file=None):
+def generate_subtitles(model, task, audio_file, subtitle_file, max_words_per_subtitle, transcript_file=None):
     """
     Transcribes the specified audio file using the Faster-Whisper model, generates an SRT subtitle file
-    at the specified output file path, and optionally generates a transcript file. Returns True if the
-    subtitle generation is successful, False otherwise.
+    at the specified output file path, and optionally generates a transcript file. Adjusts subtitles to not exceed
+    the max words per subtitle. Returns True if successful, False otherwise.
     """
     if os.path.exists(subtitle_file):
         print(f"Skipping {audio_file} - subtitles file already exists")
@@ -122,11 +123,18 @@ def generate_subtitles(model, task, audio_file, subtitle_file, transcript_file=N
         texts.append(text)
 
         if text:
-            # Create a subtitle object for the segment
-            subtitle = srt.Subtitle(
-                index=i + 1, start=start_time, end=end_time, content=text
-            )
-            subtitles.append(subtitle)
+            words = text.split()
+            for j in range(0, len(words), max_words_per_subtitle):
+                chunk = " ".join(words[j:j+max_words_per_subtitle])
+                sub_start_time = start_time + datetime.timedelta(seconds=j * (segment.end - segment.start) / len(words))
+                sub_end_time = start_time + datetime.timedelta(seconds=min(j+max_words_per_subtitle, len(words)) * (segment.end - segment.start) / len(words))
+                subtitle = srt.Subtitle(
+                    index=len(subtitles) + 1,
+                    start=sub_start_time,
+                    end=sub_end_time,
+                    content=chunk
+                )
+                subtitles.append(subtitle)
 
     # Write the subtitles to the SRT file
     with open(subtitle_file, "w", encoding="utf-8") as f:
@@ -276,7 +284,8 @@ if __name__ == "__main__":
         openai_api_base,
         openai_model,
         text_chunk_size,
-        max_chunk
+        max_chunk,
+        max_words_per_subtitle
     ) = read_config(config_file)
 
     logging.basicConfig()
@@ -315,6 +324,7 @@ if __name__ == "__main__":
                     task,
                     audio_file,
                     subtitle_file,
+                    max_words_per_subtitle,
                     transcript_file,
                 )
             try:
